@@ -1,0 +1,31 @@
+[package]
+name = "blog-cms"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+dotenvy = "0.15"
+tower-http = { version = "0.6", features = ["fs", "limit", "trace"] }
+tower = { version = "0.5", features = ["timeout"] }
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+hex = "0.4"
+cookie = "0.18"
+argon2 = { version = "0.5", features = ["std"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+rand = { version = "0.10.0", features = ["thread_rng"] }
+serde_json = "1.0.149"
+aws-sdk-s3 = "1.127.0"
+aws-config = "1.8.15"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

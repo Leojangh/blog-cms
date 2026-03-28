@@ -1,0 +1,52 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Dashboard">
+  <h1>Dashboard</h1>
+  <div id="app"><p>加载中...</p></div>
+  <script>
+    const API = import.meta.env.PUBLIC_API_URL || 'https://api.genlz.com';
+    const app = document.getElementById('app')!;
+
+    async function load() {
+      const res = await fetch(`${API}/api/admin/dashboard`, { credentials: 'include' });
+      if (res.status === 401) { location.href = '/admin/login/'; return; }
+      const data = await res.json();
+      app.innerHTML = `
+        <p>总浏览量：${data.total_views} · 文章数：${data.posts.length} · <a href="/admin/new/">写文章</a></p>
+        <table>
+          <thead><tr><th>标题</th><th>浏览量</th><th>发布时间</th><th>操作</th></tr></thead>
+          <tbody>${data.posts.map((p: any) => `
+            <tr>
+              <td><a href="/post/${p.slug}/">${p.title}</a></td>
+              <td>${p.views}</td>
+              <td><time datetime="${p.created_at}">${p.created_at}</time></td>
+              <td>
+                <a href="/admin/edit/?slug=${p.slug}">编辑</a>
+                <button onclick="del('${p.slug}')" class="secondary outline" style="padding:4px 8px;margin:0">删除</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <form id="logoutform" style="margin-top:2rem"><button type="submit" class="secondary">退出登录</button></form>
+      `;
+      document.querySelectorAll('time[datetime]').forEach(t => {
+        const s = t.getAttribute('datetime')!.replace(' ', 'T') + 'Z';
+        t.textContent = new Date(s).toLocaleString('zh-CN');
+      });
+      document.getElementById('logoutform')!.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await fetch(`${API}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+        location.href = '/';
+      });
+    }
+
+    (window as any).del = async (slug: string) => {
+      if (!confirm('确定删除？')) return;
+      await fetch(`${API}/api/admin/posts/${slug}`, { method: 'DELETE', credentials: 'include' });
+      load();
+    };
+
+    load();
+  </script>
+</Base>

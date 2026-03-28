@@ -1,0 +1,80 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="编辑文章">
+  <h1>编辑文章</h1>
+  <form id="postform">
+    <label>标题 <input type="text" name="title" required></label>
+    <label>Slug <input type="text" name="slug" required></label>
+    <label>内容（Markdown，可拖入或粘贴图片）<textarea id="editor" name="content" rows="15" required></textarea></label>
+    <button type="submit">保存</button>
+  </form>
+  <form id="deleteform" style="margin-top:1rem"><button type="submit" class="secondary outline">删除文章</button></form>
+  <p id="error" style="color:red;display:none"></p>
+  <script>
+    const API = import.meta.env.PUBLIC_API_URL || 'https://api.genlz.com';
+    const slug = new URLSearchParams(location.search).get('slug');
+    if (!slug) location.href = '/admin/';
+    const ed = document.getElementById('editor') as HTMLTextAreaElement;
+    const form = document.getElementById('postform') as HTMLFormElement;
+    const uploaded: string[] = [];
+
+    fetch(`${API}/api/admin/posts/${slug}`, { credentials: 'include' }).then(r => {
+      if (r.status === 401) { location.href = '/admin/login/'; return; }
+      if (!r.ok) { location.href = '/admin/'; return; }
+      return r.json();
+    }).then(data => {
+      if (!data) return;
+      (form.querySelector('[name=title]') as HTMLInputElement).value = data.title;
+      (form.querySelector('[name=slug]') as HTMLInputElement).value = data.slug;
+      ed.value = data.content;
+    });
+
+    document.addEventListener('dragover', e => e.preventDefault());
+    document.addEventListener('drop', e => e.preventDefault());
+
+    function upload(file: File) {
+      const fd = new FormData(); fd.append('file', file);
+      const p = ed.selectionStart;
+      const ph = `![上传中...]()\n`;
+      ed.setRangeText(ph, p, p);
+      fetch(`${API}/api/admin/upload`, { method: 'POST', credentials: 'include', body: fd })
+        .then(r => { if (!r.ok) throw r; return r.json(); })
+        .then(data => { uploaded.push(data.url); ed.value = ed.value.replace(ph, `![${file.name}](${data.url})\n`); })
+        .catch(() => { ed.value = ed.value.replace(ph, ''); });
+    }
+
+    ed.addEventListener('drop', e => { e.stopPropagation(); const f = [...e.dataTransfer!.files].filter(f => f.type.startsWith('image/')); if (f.length) { e.preventDefault(); f.forEach(upload); } });
+    ed.addEventListener('dragover', e => { e.stopPropagation(); e.preventDefault(); });
+    ed.addEventListener('paste', e => { const f = [...e.clipboardData!.files].filter(f => f.type.startsWith('image/')); if (f.length) { e.preventDefault(); f.forEach(upload); } });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const content = fd.get('content') as string;
+      uploaded.forEach(url => {
+        if (!content.includes(url)) {
+          fetch(`${API}/api/admin/delete-image`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+        }
+      });
+      const res = await fetch(`${API}/api/admin/posts/${slug}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: fd.get('title'), slug: fd.get('slug'), content }),
+      });
+      if (res.ok) { const data = await res.json(); location.href = `/post/${data.slug}/`; }
+      else {
+        const data = await res.json().catch(() => null);
+        const err = document.getElementById('error')!;
+        err.style.display = 'block'; err.textContent = data?.error || '保存失败';
+      }
+    });
+
+    document.getElementById('deleteform')!.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!confirm('确定删除这篇文章吗？')) return;
+      await fetch(`${API}/api/admin/posts/${slug}`, { method: 'DELETE', credentials: 'include' });
+      location.href = '/admin/';
+    });
+  </script>
+</Base>

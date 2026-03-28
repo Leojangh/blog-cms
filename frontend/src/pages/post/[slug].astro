@@ -1,0 +1,32 @@
+---
+import Base from '../../layouts/Base.astro';
+import { marked } from 'marked';
+
+const API = import.meta.env.PUBLIC_API_URL || 'https://api.genlz.com';
+
+export async function getStaticPaths() {
+  const API = import.meta.env.PUBLIC_API_URL || 'https://api.genlz.com';
+  const posts = await fetch(`${API}/api/posts`).then(r => r.json()).catch(() => []);
+  return posts.map((p: any) => ({ params: { slug: p.slug } }));
+}
+
+const { slug } = Astro.params;
+const post = await fetch(`${API}/api/posts/${slug}`).then(r => r.json());
+const html = await marked.parse(post.content);
+---
+<Base title={post.title}>
+  <article>
+    <header>
+      <h1>{post.title}</h1>
+      <small><time datetime={post.created_at}>{post.created_at}</time></small>
+    </header>
+    <Fragment set:html={html} />
+  </article>
+  <a href="/">← 返回首页</a>
+  <script>
+    document.querySelectorAll('time[datetime]').forEach(t => {
+      const s = t.getAttribute('datetime')!.replace(' ', 'T') + 'Z';
+      t.textContent = new Date(s).toLocaleString('zh-CN');
+    });
+  </script>
+</Base>

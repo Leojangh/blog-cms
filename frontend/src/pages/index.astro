@@ -1,0 +1,21 @@
+---
+import Base from '../layouts/Base.astro';
+
+const API = import.meta.env.PUBLIC_API_URL || 'https://api.genlz.com';
+const posts = await fetch(`${API}/api/posts`).then(r => r.json()).catch(() => []);
+---
+<Base title="首页">
+  {posts.map((p: any) => (
+    <article>
+      <h2><a href={`/post/${p.slug}/`}>{p.title}</a></h2>
+      <small><time datetime={p.created_at}>{p.created_at}</time></small>
+    </article>
+  ))}
+  {posts.length === 0 && <p>还没有文章。</p>}
+  <script>
+    document.querySelectorAll('time[datetime]').forEach(t => {
+      const s = t.getAttribute('datetime')!.replace(' ', 'T') + 'Z';
+      t.textContent = new Date(s).toLocaleString('zh-CN');
+    });
+  </script>
+</Base>

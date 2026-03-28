@@ -1,0 +1,35 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="登录">
+  <h1>管理员登录</h1>
+  <p id="error" style="color:red;display:none"></p>
+  <form id="loginform">
+    <label>用户名 <input type="text" name="username" required></label>
+    <label>密码 <input type="password" name="password" required></label>
+    <button type="submit">登录</button>
+  </form>
+  <script>
+    const API = import.meta.env.PUBLIC_API_URL || 'https://api.genlz.com';
+    // If already logged in, redirect
+    fetch(`${API}/api/auth/me`, { credentials: 'include' }).then(r => {
+      if (r.ok) location.href = '/admin/';
+    });
+    document.getElementById('loginform')!.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target as HTMLFormElement);
+      const res = await fetch(`${API}/api/auth/login`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: fd.get('username'), password: fd.get('password') }),
+      });
+      if (res.ok) { location.href = '/admin/'; }
+      else {
+        const data = await res.json().catch(() => null);
+        document.getElementById('error')!.style.display = 'block';
+        document.getElementById('error')!.textContent = data?.error || '登录失败';
+      }
+    });
+  </script>
+</Base>
