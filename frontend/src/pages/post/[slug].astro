@@ -11,7 +11,9 @@ export async function getStaticPaths() {
 }
 
 const { slug } = Astro.params;
-const post = await fetch(`${API}/api/posts/${slug}`).then(r => r.json());
+const res = await fetch(`${API}/api/posts/${slug}`);
+if (!res.ok) return Astro.redirect('/');
+const post = await res.json();
 const html = await marked.parse(post.content);
 ---
 <Base title={post.title}>

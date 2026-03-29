@@ -14,7 +14,7 @@ static VIEW_COUNTER: std::sync::LazyLock<Mutex<HashMap<String, i64>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn flush_views(db: &crate::models::Db) {
-    let mut counts = VIEW_COUNTER.lock().unwrap();
+    let mut counts = VIEW_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
     if counts.is_empty() { return; }
     let db = db.blocking_lock();
     for (slug, count) in counts.drain() {
@@ -47,7 +47,7 @@ pub async fn list(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 pub async fn show(State(state): State<AppState>, Path(slug): Path<String>) -> impl IntoResponse {
-    { VIEW_COUNTER.lock().unwrap().entry(slug.clone()).and_modify(|c| *c += 1).or_insert(1); }
+    { VIEW_COUNTER.lock().unwrap_or_else(|e| e.into_inner()).entry(slug.clone()).and_modify(|c| *c += 1).or_insert(1); }
     let conn = state.db.lock().await;
     let result = conn.query_row(
         "SELECT slug, title, content, created_at FROM posts WHERE slug = ?1", [&slug],
