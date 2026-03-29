@@ -30,7 +30,9 @@ blog-cms/
 │   │   ├── post/[slug].astro  # 文章页 (SSG)
 │   │   └── admin/          # 管理后台 (CSR)
 │   └── astro.config.mjs
-├── deploy.sh               # 后端部署脚本
+├── deploy.sh               # Linux 后端部署脚本
+├── deploy-android.sh       # Android 后端部署脚本
+├── blog-cms-android.sh     # Android 服务管理脚本（部署后推送到设备）
 └── Cargo.toml
 ```
 
@@ -91,12 +93,22 @@ PUBLIC_API_URL=http://127.0.0.1:3000 bun run dev
 
 ### 前置条件
 
-- Rust + `cargo-zigbuild`（交叉编译）：`cargo install cargo-zigbuild`
-- Zig：`brew install zig`
+- Rust toolchain：`rustup`
 - Bun：`brew install oven-sh/bun/bun`
+
+#### Linux 服务器部署额外依赖
+
+- `cargo-zigbuild`：`cargo install cargo-zigbuild`
+- Zig：`brew install zig`
 - musl target：`rustup target add x86_64-unknown-linux-musl`
 
-### 部署后端
+#### Android 设备部署额外依赖
+
+- Android NDK（通过 Android Studio SDK Manager 安装）
+- Android target：`rustup target add aarch64-linux-android`
+- ADB 连接到目标设备
+
+### 部署后端（Linux 服务器）
 
 ```bash
 ./deploy.sh
@@ -105,8 +117,109 @@ PUBLIC_API_URL=http://127.0.0.1:3000 bun run dev
 脚本执行：
 1. `cargo zigbuild --release --target x86_64-unknown-linux-musl`
 2. SSH 停止远程 blog-cms 服务
-3. SCP 上传二进制和静态文件到 `/opt/blog-cms/`
+3. SCP 上传二进制到 `/opt/blog-cms/`
 4. SSH 启动服务
+
+### 部署后端（Android 设备）
+
+部署目录：`/mnt/scratch/overlay/system_ext/upper/blog-cms`
+
+```bash
+./deploy-android.sh
+```
+
+脚本执行：
+1. 使用 NDK toolchain 交叉编译 `aarch64-linux-android` target
+2. 通过 ADB 推送二进制、`.env`（自动替换 `DATABASE_PATH`）和管理脚本到设备
+3. 设备上通过管理脚本控制服务
+
+#### 管理脚本
+
+设备上的 `blog-cms.sh`（可通过软链接 `/system_ext/bin/blog-cms` 调用）：
+
+```bash
+blog-cms start     # 启动服务
+blog-cms stop      # 停止服务
+blog-cms restart   # 重启服务
+blog-cms status    # 查看运行状态
+blog-cms watch     # 守护模式（进程退出后每 5 秒自动重启）
+blog-cms log       # 查看日志
+```
+
+#### Cloudflare Tunnel（Android）
+
+设备需安装 `cloudflared`，配置文件位于 `<部署目录>/.cloudflared/`：
+
+```bash
+# 登录（需要浏览器授权）
+HOME=<部署目录> SSL_CERT_DIR=/system/etc/security/cacerts cloudflared tunnel login
+
+# 创建 tunnel
+HOME=<部署目录> SSL_CERT_DIR=/system/etc/security/cacerts cloudflared tunnel create blog-cms
+
+# 配置 DNS
+HOME=<部署目录> SSL_CERT_DIR=/system/etc/security/cacerts cloudflared tunnel route dns blog-cms api.genlz.com
+```
+
+`config.yml`：
+
+```yaml
+tunnel: <tunnel-id>
+credentials-file: <部署目录>/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: api.genlz.com
+    service: http://127.0.0.1:3000
+  - service: http_status:404
+```
+
+启动 tunnel：
+
+```bash
+HOME=<部署目录> SSL_CERT_DIR=/system/etc/security/cacerts \
+  cloudflared tunnel --config <部署目录>/.cloudflared/config.yml run
+```
+
+> **注意**：Android 上需设置 `SSL_CERT_DIR=/system/etc/security/cacerts` 以解决 TLS 证书验证问题。
+
+#### 开机自启（Android init.rc）
+
+在 `/system_ext/etc/init/` 下创建 `blog-cms.rc`，通过 Android init 系统实现开机自启：
+
+```ini
+service blog-cms /system_ext/blog-cms/blog-cms.sh watch
+    class late_start
+    user root
+    group root inet
+    seclabel u:r:su:s0
+    setenv HOME <部署目录>
+    setenv SSL_CERT_DIR /system/etc/security/cacerts
+
+service cloudflared /system_ext/bin/cloudflared tunnel --config /system_ext/blog-cms/.cloudflared/config.yml run
+    class late_start
+    user root
+    group root inet
+    seclabel u:r:su:s0
+    setenv HOME <部署目录>
+    setenv SSL_CERT_DIR /system/etc/security/cacerts
+```
+
+写入方式（需通过 overlay upper 目录）：
+
+```bash
+# 将文件写入 overlay upper（需 adb root）
+adb root
+cp /data/local/tmp/blog-cms.rc /mnt/scratch/overlay/system_ext/upper/etc/init/blog-cms.rc
+chmod 644 /mnt/scratch/overlay/system_ext/upper/etc/init/blog-cms.rc
+chcon u:object_r:system_file:s0 /mnt/scratch/overlay/system_ext/upper/etc/init/blog-cms.rc
+```
+
+> **注意事项**：
+> - `.rc` 文件权限必须为 `644`，否则 init 会以 `insecure file` 拒绝解析
+> - SELinux 上下文必须为 `u:object_r:system_file:s0`
+> - 通过 `adb push` 推送的二进制文件可能被标记为 `overlayfs_file`，需用 `chcon u:object_r:system_file:s0` 修正
+> - 不要使用 `oneshot`，否则主进程退出后 init 会 SIGKILL 整个进程组
+> - `class late_start` 确保网络就绪后再启动服务
 
 ### 部署前端
 
@@ -116,7 +229,7 @@ PUBLIC_API_URL=https://api.genlz.com bun run build
 # 将 dist/ 目录上传到 Cloudflare Pages (Direct Upload)
 ```
 
-## 服务器配置
+## 服务器配置（Linux）
 
 ### systemd 服务
 
@@ -139,7 +252,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-### Cloudflare Tunnel
+### Cloudflare Tunnel（Linux）
 
 `/etc/cloudflared/config.yml`：
 
@@ -149,8 +262,6 @@ credentials-file: /root/.cloudflared/<tunnel-id>.json
 
 ingress:
   - hostname: api.genlz.com
-    service: http://127.0.0.1:3000
-  - hostname: genlz.com
     service: http://127.0.0.1:3000
   - service: http_status:404
 ```
