@@ -14,6 +14,19 @@ use crate::AppState;
 
 use std::sync::{Arc, LazyLock};
 
+static DEPLOY_HOOK: LazyLock<Option<String>> = LazyLock::new(|| std::env::var("DEPLOY_HOOK").ok());
+
+fn trigger_deploy() {
+    if let Some(url) = DEPLOY_HOOK.as_ref() {
+        let url = url.clone();
+        tokio::spawn(async move {
+            tokio::process::Command::new("curl")
+                .args(["-sS", "-X", "POST", &url])
+                .output().await.ok();
+        });
+    }
+}
+
 static ADMIN_USER: LazyLock<String> = LazyLock::new(|| {
     std::env::var("ADMIN_USER").unwrap_or_else(|_| "admin".into())
 });
@@ -174,7 +187,7 @@ pub async fn create_post(State(state): State<AppState>, Json(input): Json<PostIn
         "INSERT INTO posts (title, slug, content) VALUES (?1, ?2, ?3)",
         (&input.title, &input.slug, &input.content),
     ) {
-        Ok(_) => (StatusCode::CREATED, Json(serde_json::json!({"slug": input.slug}))).into_response(),
+        Ok(_) => { trigger_deploy(); (StatusCode::CREATED, Json(serde_json::json!({"slug": input.slug}))).into_response() },
         Err(_) => (StatusCode::CONFLICT, Json(serde_json::json!({"error": "slug 已存在"}))).into_response(),
     }
 }
@@ -198,7 +211,7 @@ pub async fn update_post(State(state): State<AppState>, Path(slug): Path<String>
         (&input.title, &input.slug, &input.content, &slug),
     ) {
         Ok(0) => StatusCode::NOT_FOUND.into_response(),
-        Ok(_) => Json(serde_json::json!({"slug": input.slug})).into_response(),
+        Ok(_) => { trigger_deploy(); Json(serde_json::json!({"slug": input.slug})).into_response() },
         Err(_) => (StatusCode::CONFLICT, Json(serde_json::json!({"error": "slug 已存在"}))).into_response(),
     }
 }
@@ -213,6 +226,7 @@ pub async fn delete_post(State(state): State<AppState>, Path(slug): Path<String>
         }
     }
     conn.execute("DELETE FROM posts WHERE slug = ?1", [&slug]).ok();
+    trigger_deploy();
     StatusCode::NO_CONTENT
 }
 
